@@ -1,125 +1,165 @@
 const http = require("http");
 const { Server } = require("socket.io");
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 const HOST_PASSWORD = process.env.HOST_PASSWORD || "change-me";
-const REQUIRED_CLIENT = process.env.REQUIRED_CLIENT || "0.4.x";
 
-const server = http.createServer((req, res) => {
-  res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+if (!process.env.HOST_PASSWORD) {
+  console.warn("Set HOST_PASSWORD to choose the host password.");
+}
+
+const httpServer = http.createServer((req, res) => {
+  res.writeHead(200, { "content-type": "text/plain" });
   res.end("Spotify Listen Together server OK\n");
 });
 
-const io = new Server(server, {
-  cors: { origin: "*", methods: ["GET", "POST"] },
+const io = new Server(httpServer, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  },
   transports: ["websocket", "polling"]
 });
 
 const clients = new Map();
 let hostId = null;
-let currentTrack = "";
-let currentPaused = true;
-let currentPosition = 0;
+let lastTrackUri = "";
+let lastPaused = false;
+let lastPositionMs = 0;
 
 function publicClients() {
-  return [...clients.values()].map(c => ({
+  return Array.from(clients.values()).map(c => ({
     name: c.name,
     isHost: c.id === hostId,
-    watchingAD: !!c.watchingAD
+    watchingAD: false,
+    watchingAd: false
   }));
 }
 
-function sendListeners() {
+function emitListeners() {
   io.emit("listeners", publicClients());
 }
 
-function setHost(id) {
-  if (hostId && clients.has(hostId)) io.to(hostId).emit("isHost", false);
-  hostId = id || null;
-  if (hostId && clients.has(hostId)) io.to(hostId).emit("isHost", true);
-  sendListeners();
+function isHost(socket) {
+  return socket.id === hostId;
+}
+
+function makeHost(socket) {
+  if (hostId && clients.has(hostId)) {
+    io.to(hostId).emit("isHost", false);
+  }
+  hostId = socket.id;
+  socket.emit("isHost", true);
+  emitListeners();
+  console.log(`Host is now ${clients.get(socket.id)?.name || socket.id}`);
 }
 
 io.on("connection", socket => {
-  clients.set(socket.id, { id: socket.id, name: "Unnamed", watchingAD: false });
+  clients.set(socket.id, { id: socket.id, name: "Unnamed" });
+  console.log(`Connected ${socket.id}`);
 
-  socket.on("login", (name, version, incompatible) => {
-    const c = clients.get(socket.id);
-    if (!c) return;
-    c.name = String(name || "Unnamed").slice(0, 40);
+  socket.on("login", (name, version, incompatibleCallback) => {
+    const client = clients.get(socket.id);
+    if (client) client.name = name || "Unnamed";
 
-    if (!hostId) setHost(socket.id);
+    console.log(`Login ${client?.name} version=${version || "unknown"}`);
+
+    if (!hostId) makeHost(socket);
     else socket.emit("isHost", socket.id === hostId);
 
-    if (currentTrack) {
-      socket.emit("changeSong", currentTrack);
-      socket.emit("updateSong", currentPaused, currentPosition);
+    emitListeners();
+
+    // If someone joins late, try to push the latest known song to them.
+    if (lastTrackUri) {
+      console.log(`Sending last track to late joiner: ${lastTrackUri}`);
+      socket.emit("changeSong", lastTrackUri);
+      setTimeout(() => socket.emit("updateSong", lastPaused, lastPositionMs), 1000);
     }
-    sendListeners();
   });
 
   socket.on("requestHost", password => {
-    if (String(password || "") === HOST_PASSWORD) {
-      setHost(socket.id);
-      socket.emit("bottomMessage", "You are now the host.");
+    if (password === HOST_PASSWORD) {
+      makeHost(socket);
+      socket.emit("bottomMessage", "You are now a host.");
     } else {
       socket.emit("windowMessage", "Wrong host password.");
     }
   });
 
   socket.on("cancelHost", () => {
-    if (socket.id === hostId) setHost(null);
+    if (isHost(socket)) {
+      socket.emit("isHost", false);
+      hostId = null;
+      emitListeners();
+      console.log("Host cancelled hosting");
+    }
   });
 
+  // Host changed/loaded a song. Relay it to every other listener.
   socket.on("loadingSong", trackUri => {
-    if (socket.id !== hostId) return;
-    currentTrack = trackUri || "";
-    socket.broadcast.emit("changeSong", currentTrack);
+    if (!isHost(socket)) return;
+    if (!trackUri) return;
+    lastTrackUri = trackUri;
+    lastPaused = false;
+    lastPositionMs = 0;
+    console.log(`Host loadingSong: ${trackUri}`);
+    socket.broadcast.emit("changeSong", trackUri);
   });
 
   socket.on("changedSong", (trackUri, trackName, imageUrl) => {
-    if (socket.id !== hostId) return;
-    currentTrack = trackUri || "";
-    currentPaused = true;
-    currentPosition = 0;
-    socket.broadcast.emit("changeSong", currentTrack);
+    if (!isHost(socket)) return;
+    if (!trackUri) return;
+    lastTrackUri = trackUri;
+    lastPaused = false;
+    lastPositionMs = 0;
+    console.log(`Host changedSong: ${trackUri} ${trackName || ""}`);
+    socket.broadcast.emit("changeSong", trackUri);
   });
 
   socket.on("requestChangeSong", trackUri => {
-    if (socket.id !== hostId) return;
-    currentTrack = trackUri || "";
-    io.emit("changeSong", currentTrack);
+    if (!isHost(socket)) return;
+    if (!trackUri) return;
+    lastTrackUri = trackUri;
+    lastPaused = false;
+    lastPositionMs = 0;
+    console.log(`Host requestChangeSong: ${trackUri}`);
+    socket.broadcast.emit("changeSong", trackUri);
   });
 
   socket.on("requestUpdateSong", (paused, milliseconds) => {
-    if (socket.id !== hostId) return;
-    currentPaused = !!paused;
-    if (Number.isFinite(milliseconds)) currentPosition = milliseconds;
-    socket.broadcast.emit("updateSong", currentPaused, currentPosition);
+    if (!isHost(socket)) return;
+    lastPaused = !!paused;
+    if (typeof milliseconds === "number") lastPositionMs = milliseconds;
+    console.log(`Host updateSong paused=${lastPaused} ms=${lastPositionMs}`);
+    socket.broadcast.emit("updateSong", lastPaused, lastPositionMs);
   });
 
+  // Non-host song request goes to host.
   socket.on("requestSong", (trackUri, trackName) => {
-    if (!hostId || !clients.has(hostId)) {
-      socket.emit("windowMessage", "No host is connected right now.");
-      return;
-    }
-    const from = clients.get(socket.id)?.name || "A listener";
-    io.to(hostId).emit("songRequested", trackUri, trackName || "UNKNOWN NAME", from);
+    const requester = clients.get(socket.id)?.name || "A listener";
+    console.log(`Song request from ${requester}: ${trackUri} ${trackName || ""}`);
+    if (hostId) io.to(hostId).emit("songRequested", trackUri, trackName || trackUri, requester);
   });
 
   socket.on("disconnect", () => {
     const wasHost = socket.id === hostId;
+    const name = clients.get(socket.id)?.name || socket.id;
     clients.delete(socket.id);
+    console.log(`Disconnected ${name}`);
+
     if (wasHost) {
-      const next = clients.keys().next().value || null;
-      setHost(next);
-    } else {
-      sendListeners();
+      hostId = null;
+      const next = clients.keys().next().value;
+      if (next) {
+        hostId = next;
+        io.to(next).emit("isHost", true);
+        console.log(`Auto-promoted new host ${clients.get(next)?.name || next}`);
+      }
     }
+    emitListeners();
   });
 });
 
-server.listen(PORT, () => {
+httpServer.listen(PORT, () => {
   console.log(`Spotify Listen Together server listening on ${PORT}`);
-  console.log("Set HOST_PASSWORD to choose the host password.");
 });

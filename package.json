@@ -1,15 +1,14 @@
 {
   "name": "spotify-listen-together-server-2026",
-  "version": "1.0.0",
-  "private": true,
-  "type": "commonjs",
+  "version": "1.0.1",
+  "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
-  "engines": {
-    "node": ">=20"
-  },
   "dependencies": {
     "socket.io": "^4.8.1"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }
