@@ -2,11 +2,7 @@ const http = require("http");
 const { Server } = require("socket.io");
 
 const PORT = process.env.PORT || 8080;
-const HOST_PASSWORD = process.env.HOST_PASSWORD || "change-me";
-
-if (!process.env.HOST_PASSWORD) {
-  console.warn("Set HOST_PASSWORD to choose the host password.");
-}
+const HOST_PASSWORD = "hawk";
 
 const httpServer = http.createServer((req, res) => {
   res.writeHead(200, { "content-type": "text/plain" });
