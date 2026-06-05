@@ -4,6 +4,8 @@ const { Server } = require("socket.io");
 const PORT = process.env.PORT || 8080;
 const HOST_PASSWORD = "hawk";
 
+console.log("Host password is built into server.js.");
+
 const httpServer = http.createServer((req, res) => {
   res.writeHead(200, { "content-type": "text/plain" });
   res.end("Spotify Listen Together server OK\n");
