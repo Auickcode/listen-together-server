@@ -24,6 +24,11 @@ let hostId = null;
 let lastTrackUri = "";
 let lastPaused = false;
 let lastPositionMs = 0;
+let queue = [];
+
+function emitQueue() {
+  io.emit("queueUpdated", queue);
+}
 
 function publicClients() {
   return Array.from(clients.values()).map(c => ({
@@ -73,6 +78,8 @@ io.on("connection", socket => {
       socket.emit("changeSong", lastTrackUri);
       setTimeout(() => socket.emit("updateSong", lastPaused, lastPositionMs), 1000);
     }
+
+    socket.emit("queueUpdated", queue);
   });
 
   socket.on("requestHost", password => {
@@ -132,11 +139,32 @@ io.on("connection", socket => {
     socket.broadcast.emit("updateSong", lastPaused, lastPositionMs);
   });
 
-  // Non-host song request goes to host.
   socket.on("requestSong", (trackUri, trackName) => {
     const requester = clients.get(socket.id)?.name || "A listener";
-    console.log(`Song request from ${requester}: ${trackUri} ${trackName || ""}`);
-    if (hostId) io.to(hostId).emit("songRequested", trackUri, trackName || trackUri, requester);
+
+    queue.push({
+      trackUri,
+      trackName: trackName || trackUri,
+      requester
+    });
+
+    emitQueue();
+
+    socket.emit("bottomMessage", `" + '${trackName || trackUri}' + "` added to queue.");
+  });
+
+  socket.on("songFinished", () => {
+    if (!isHost(socket)) return;
+    if (!queue.length) return;
+
+    const next = queue.shift();
+    emitQueue();
+
+    lastTrackUri = next.trackUri;
+    lastPaused = false;
+    lastPositionMs = 0;
+
+    io.emit("changeSong", next.trackUri);
   });
 
   socket.on("disconnect", () => {
