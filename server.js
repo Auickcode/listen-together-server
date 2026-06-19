@@ -32,7 +32,26 @@ function emitQueue() {
   io.emit("queueUpdated", queue);
 }
 
-function addToQueue(socket, trackUri, trackName, imageUrl) {
+async function getSpotifyMetadata(trackUri) {
+  try {
+    const [, type, id] = trackUri.split(":");
+    const publicUrl = `https://open.spotify.com/${type}/${id}`;
+    const response = await fetch(
+      `https://open.spotify.com/oembed?url=${encodeURIComponent(publicUrl)}`
+    );
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (!data?.title) return null;
+    return {
+      trackName: data.title,
+      imageUrl: data.thumbnail_url || ""
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function addToQueue(socket, trackUri, trackName, imageUrl) {
   if (
     typeof trackUri !== "string" ||
     !/^spotify:(track|episode):[A-Za-z0-9]+$/i.test(trackUri.trim())
@@ -41,13 +60,22 @@ function addToQueue(socket, trackUri, trackName, imageUrl) {
     return;
   }
 
+  trackUri = trackUri.trim();
+  if (!trackName || /^spotify:(track|episode):/i.test(trackName)) {
+    const metadata = await getSpotifyMetadata(trackUri);
+    if (metadata) {
+      trackName = metadata.trackName;
+      imageUrl = imageUrl || metadata.imageUrl;
+    }
+  }
+
   const requester = clients.get(socket.id)?.name || "A listener";
   const item = {
     id: nextQueueId++,
-    trackUri: trackUri.trim(),
+    trackUri,
     trackName: typeof trackName === "string" && trackName.trim()
       ? trackName.trim()
-      : trackUri.trim(),
+      : "Unknown Spotify song",
     imageUrl: typeof imageUrl === "string" ? imageUrl : "",
     requester
   };
@@ -200,12 +228,12 @@ io.on("connection", socket => {
   });
 
   // Both names are accepted so older clients can still add requests.
-  socket.on("requestSong", (trackUri, trackName, imageUrl) => {
-    addToQueue(socket, trackUri, trackName, imageUrl);
+  socket.on("requestSong", async (trackUri, trackName, imageUrl) => {
+    await addToQueue(socket, trackUri, trackName, imageUrl);
   });
 
-  socket.on("addQueueItem", (trackUri, trackName, imageUrl) => {
-    addToQueue(socket, trackUri, trackName, imageUrl);
+  socket.on("addQueueItem", async (trackUri, trackName, imageUrl) => {
+    await addToQueue(socket, trackUri, trackName, imageUrl);
   });
 
   socket.on("removeQueueItem", queueId => {
