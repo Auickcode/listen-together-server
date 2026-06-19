@@ -1,14 +1,10 @@
 {
-  "name": "spotify-listen-together-server-2026",
-  "version": "1.0.1",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
+  "name":"spotify-listen-together-server-queue",
+  "version":"1.1.0",
+  "main":"server.js",
+  "scripts":{"start":"node server.js"},
+  "dependencies":{
+    "socket.io":"^4.8.1"
   },
-  "dependencies": {
-    "socket.io": "^4.8.1"
-  },
-  "engines": {
-    "node": ">=18"
-  }
+  "engines":{"node":">=18"}
 }
