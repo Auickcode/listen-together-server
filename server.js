@@ -32,7 +32,7 @@ function emitQueue() {
   io.emit("queueUpdated", queue);
 }
 
-function addToQueue(socket, trackUri, trackName) {
+function addToQueue(socket, trackUri, trackName, imageUrl) {
   if (
     typeof trackUri !== "string" ||
     !/^spotify:(track|episode):[A-Za-z0-9]+$/i.test(trackUri.trim())
@@ -48,6 +48,7 @@ function addToQueue(socket, trackUri, trackName) {
     trackName: typeof trackName === "string" && trackName.trim()
       ? trackName.trim()
       : trackUri.trim(),
+    imageUrl: typeof imageUrl === "string" ? imageUrl : "",
     requester
   };
 
@@ -199,12 +200,12 @@ io.on("connection", socket => {
   });
 
   // Both names are accepted so older clients can still add requests.
-  socket.on("requestSong", (trackUri, trackName) => {
-    addToQueue(socket, trackUri, trackName);
+  socket.on("requestSong", (trackUri, trackName, imageUrl) => {
+    addToQueue(socket, trackUri, trackName, imageUrl);
   });
 
-  socket.on("addQueueItem", (trackUri, trackName) => {
-    addToQueue(socket, trackUri, trackName);
+  socket.on("addQueueItem", (trackUri, trackName, imageUrl) => {
+    addToQueue(socket, trackUri, trackName, imageUrl);
   });
 
   socket.on("removeQueueItem", queueId => {
