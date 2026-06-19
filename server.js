@@ -140,17 +140,33 @@ io.on("connection", socket => {
   });
 
   socket.on("requestSong", (trackUri, trackName) => {
+    if (!trackUri) return;
     const requester = clients.get(socket.id)?.name || "A listener";
 
     queue.push({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       trackUri,
       trackName: trackName || trackUri,
+      requesterId: socket.id,
       requester
     });
 
     emitQueue();
 
-    socket.emit("bottomMessage", `" + '${trackName || trackUri}' + "` added to queue.");
+    socket.emit("bottomMessage", `"${trackName || trackUri}" added to the queue.`);
+  });
+
+  // Anyone can remove their own request; the host can remove anything.
+  socket.on("requestRemoveSong", queueItemId => {
+    if (!queueItemId) return;
+    const item = queue.find(q => q.id === queueItemId);
+    if (!item) return;
+    if (!isHost(socket) && item.requesterId !== socket.id) {
+      socket.emit("windowMessage", "You can only remove songs you requested.");
+      return;
+    }
+    queue = queue.filter(q => q.id !== queueItemId);
+    emitQueue();
   });
 
   socket.on("songFinished", () => {
